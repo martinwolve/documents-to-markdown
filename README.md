@@ -1,6 +1,6 @@
 # documents-to-markdown
 
-A Claude [Agent Skill](https://agentskills.io) that converts documents from a project's context (PDF, Word, Excel, PowerPoint, txt, csv, rtf) into separate Markdown files, one per source document, preserving the full integral text and recognizable source and page marking via invisible HTML comments.
+A Claude [Agent Skill](https://agentskills.io) that converts documents available in the conversation — both documents in a project's context and documents attached directly to the chat (PDF, Word, Excel, PowerPoint, txt, csv, rtf) — into separate Markdown files, one per source document, preserving the full integral text and recognizable source and page marking via invisible HTML comments.
 
 Its distinguishing feature is correct handling of **revision markings** in amended documents, such as contracts adjusted after a tender addendum (in Dutch: a *Nota van Inlichtingen*).
 
@@ -47,10 +47,11 @@ Place the `skills/documents-to-markdown/` folder where your Claude Code skills a
 
 ## Usage
 
-With documents in the project context, ask for example:
+With documents in the project context or attached to the chat, ask for example:
 
 - "Convert these documents to MD"
 - "Turn the PDFs in the project context into Markdown files"
+- "Convert the attached documents to Markdown"
 - Dutch equivalent: "zet deze documenten om naar MD"
 
 For an amended document, the skill first runs the detection pre-scan to see which pages carry color, highlight, or strikethrough, then transcribes those pages from their rendered image so the markings are handled correctly.

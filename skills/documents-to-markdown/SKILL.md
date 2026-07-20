@@ -1,13 +1,22 @@
 ---
 name: documents-to-markdown
-description: Converts documents from the project context (PDF, Word, Excel, PowerPoint, txt, csv, rtf and other textual files) into separate Markdown files, one per source document, preserving the full integral text and recognizable source and page marking via invisible HTML comments. Correctly recognizes and handles revision markings (strikethrough text, colored changes, highlighted fill-in fields) so that deleted text does not end up in the output. Use this skill when the user explicitly asks to convert documents to Markdown or MD, for example "convert these documents to MD", "convert the PDFs to Markdown", "turn the documents in the project context into MD files", or the Dutch equivalents such as "zet deze documenten om naar MD".
-version: 1.0.0
+description: Converts documents that are available in the conversation — both documents in the project context and documents attached directly to the chat (PDF, Word, Excel, PowerPoint, txt, csv, rtf and other textual files) — into separate Markdown files, one per source document, preserving the full integral text and recognizable source and page marking via invisible HTML comments. Correctly recognizes and handles revision markings (strikethrough text, colored changes, highlighted fill-in fields) so that deleted text does not end up in the output. Use this skill when the user explicitly asks to convert documents to Markdown or MD, for example "convert these documents to MD", "convert the PDFs to Markdown", "turn the documents in the project context into MD files", "convert the attached documents to Markdown", or the Dutch equivalents such as "zet deze documenten om naar MD".
+version: 1.1.0
 license: Apache-2.0
 ---
 
 # Documents to Markdown
 
-Convert all documents from the project context into separate Markdown files, one per source document, preserving the full integral textual content and recognizable source and page marking.
+Convert all available documents into separate Markdown files, one per source document, preserving the full integral textual content and recognizable source and page marking.
+
+## Which documents to convert
+
+Documents can reach this skill through two channels, and both are in scope:
+
+- **Project context**: documents that are part of the project the conversation runs in.
+- **Chat attachments**: documents attached directly to the conversation (uploaded to the chat).
+
+Treat both as source documents. When the user does not narrow the set, convert every document from both channels. When the user points to a specific document, format, or subset (for example only the attached files, or only the PDFs), limit the conversion to that. If the exact same document appears in both channels, convert it only once.
 
 ## Purpose
 
@@ -15,7 +24,7 @@ Deliver, per source document, one separate `.md` file containing the complete te
 
 ## Supported document types
 
-Handle all common document types that may appear in the project context, including at least:
+Handle all common document types that may appear in the project context or as a chat attachment, including at least:
 
 - PDF (`.pdf`)
 - Word (`.docx`, `.doc`)
@@ -24,11 +33,11 @@ Handle all common document types that may appear in the project context, includi
 - Plain text (`.txt`)
 - CSV (`.csv`, `.tsv`)
 - Rich Text Format (`.rtf`)
-- Other textual documents present in the project context
+- Other textual documents present in the project context or attached to the conversation
 
 ## Workflow
 
-1. Inventory all documents in the project context.
+1. Inventory all documents to convert, from both channels: the documents in the project context and the documents attached to the conversation (chat). Deduplicate documents that appear in both. If the user pointed to a specific document or subset, limit the inventory to that.
 2. Determine, per document, the type and its page structure or layout:
    - PDF, Word, RTF: per page
    - Excel, CSV: per sheet (for CSV the whole file counts as one unit)
@@ -227,6 +236,6 @@ Preserve the original file name exactly as it is, including spaces, capitals, an
 
 ## Output
 
-Deliver only the separate `.md` files, one per source document from the project context, with the content and HTML comment anchors described above.
+Deliver only the separate `.md` files, one per source document (whether it came from the project context or as a chat attachment), with the content and HTML comment anchors described above.
 
 Do not give accompanying explanation, no summary of what you did, and no meta commentary outside the files.

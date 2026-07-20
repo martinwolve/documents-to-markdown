@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Detection pre-scan scratch files
+revision_detect.py
+page.png
+*.png
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

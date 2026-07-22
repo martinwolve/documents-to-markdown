@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-07-22
+
+### Changed
+- Image-only (scanned) pages — where the whole page, including running text and
+  tables, is a single raster image — are no longer delivered as a full-page
+  image. Their text and tables are OCR'd to Markdown (visual transcription), and
+  the full-page scan is not referenced, because it would only duplicate the
+  OCR'd text. Only a genuine graphic on such a page (photo, diagram, chart, map,
+  figure, signature, stamp) is cropped out — without the surrounding regular
+  text — and delivered as a separate image, and only when the page actually
+  contains one. Purely textual scanned pages now produce no image at all.
+- The detection pre-scan's `--emit-images` no longer writes full-page scans on
+  image-only pages; the IMAGE MAP instructs to OCR the text and crop only a
+  graphic region if present. Embedded figures on ordinary text pages are still
+  extracted and referenced as before.
+
+### Added
+- New SKILL.md section "Handling image-only (scanned) pages" describing the
+  OCR-the-text / crop-only-the-graphic handling, with a crop snippet.
+
 ## [1.3.1] - 2026-07-22
 
 ### Fixed

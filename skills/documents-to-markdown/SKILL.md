@@ -1,7 +1,7 @@
 ---
 name: documents-to-markdown
-description: Converts documents that are available in the conversation — both documents in the project context and documents attached directly to the chat (PDF, Word, Excel, PowerPoint, txt, csv, rtf and other textual files) — into separate Markdown files, one per source document, preserving the full integral text and recognizable source and page marking via invisible HTML comments. Correctly recognizes and handles revision markings (strikethrough text, colored changes, highlighted fill-in fields) so that deleted text does not end up in the output. Use this skill when the user explicitly asks to convert documents to Markdown or MD, for example "convert these documents to MD", "convert the PDFs to Markdown", "turn the documents in the project context into MD files", "convert the attached documents to Markdown", or the Dutch equivalents such as "zet deze documenten om naar MD".
-version: 1.1.0
+description: Converts documents that are available in the conversation — both documents in the project context and documents attached directly to the chat (PDF, Word, Excel, PowerPoint, txt, csv, rtf and other textual files) — into separate Markdown files, one per source document, preserving the full integral text and recognizable source and page marking via invisible HTML comments. Correctly recognizes and handles revision markings (strikethrough text, colored changes, highlighted fill-in fields) so that deleted text does not end up in the output, and warns when a PDF contains substantial images (scans, diagrams, screenshots) whose data would be lost in the conversion. Use this skill when the user explicitly asks to convert documents to Markdown or MD, for example "convert these documents to MD", "convert the PDFs to Markdown", "turn the documents in the project context into MD files", "convert the attached documents to Markdown", or the Dutch equivalents such as "zet deze documenten om naar MD".
+version: 1.2.0
 license: Apache-2.0
 ---
 
@@ -43,13 +43,14 @@ Handle all common document types that may appear in the project context or as a 
    - Excel, CSV: per sheet (for CSV the whole file counts as one unit)
    - PowerPoint: per slide
    - Plain text: as a single whole
-3. Determine whether the document may contain revision markings (see "Handling revision markings"). For PDF documents that may have been amended, run the pre-scan from "Detection script" to determine per page which convention applies (COLOR / HIGHLIGHT / STRIKETHROUGH).
-4. Extract, per document, the full textual content:
+3. Determine whether the document may contain revision markings (see "Handling revision markings"). For PDF documents that may have been amended, run the pre-scan from "Detection script" to determine per page which convention applies (COLOR / HIGHLIGHT / STRIKETHROUGH). The same pre-scan also produces the IMAGE MAP.
+4. For every PDF, use the pre-scan's IMAGE MAP to detect substantial images that may contain relevant data (see "Detecting images that may contain relevant data"). If any are found, prepare the warning described there; it is delivered to the user alongside the output.
+5. Extract, per document, the full textual content:
    - If a page has no revision marking, plain text extraction suffices.
    - If a page does contain markings, transcribe that page via the image according to "Transcription via vision for revision markings".
-5. Handle non-textual elements according to the rules under "Handling non-textual elements".
-6. Add an invisible HTML comment as an anchor before each text block, so it remains recognizable from which document and from which page, slide, or sheet the text originates.
-7. Deliver one separate `.md` file per source document according to the naming rules under "File naming".
+6. Handle non-textual elements according to the rules under "Handling non-textual elements".
+7. Add an invisible HTML comment as an anchor before each text block, so it remains recognizable from which document and from which page, slide, or sheet the text originates.
+8. Deliver one separate `.md` file per source document according to the naming rules under "File naming", plus the image warning from step 4 if any substantial images were detected.
 
 ## Source and page marking
 
@@ -82,19 +83,49 @@ Why this must be handled separately: the text layer of a PDF contains no reliabl
 
 ## Detection script
 
-Write the code below to a temporary file (for example `revision_detect.py`) and run it as a pre-scan: `python revision_detect.py <file-or-folder>`. It reports, per page, the detected convention and which passages contain markings, so that only changed pages need vision. Requires PyMuPDF (`pip install pymupdf`).
+Write the code below to a temporary file (for example `revision_detect.py`) and run it as a pre-scan: `python revision_detect.py <file-or-folder>`. It reports two things per page: (1) the detected revision convention and which passages contain markings, so that only changed pages need vision; and (2) an IMAGE MAP flagging substantial raster images whose data would be lost on conversion (see "Detecting images that may contain relevant data"). Requires PyMuPDF (`pip install pymupdf`).
 
 ```python
 #!/usr/bin/env python3
 """Revision preprocessor: detects color, yellow highlight, and safe strikethrough
-in PDFs. Curves (watermark) and colored bars (insertion underline) are ignored
-to avoid false strikethroughs."""
+in PDFs, plus substantial raster images that may hold data lost on conversion.
+Curves (watermark) and colored bars (insertion underline) are ignored to avoid
+false strikethroughs."""
 import sys, argparse, pathlib
 import fitz  # PyMuPDF
 
 BODY, WHITE = 0x000000, 0xFFFFFF
 
+# Image detection thresholds. Tuned to flag data-bearing images (scans, diagrams,
+# screenshots, photos) while ignoring small logos and decorations.
+PAGE_COVER_MIN = 0.08   # image covers >= 8% of the page area, or
+MIN_SIDE_PT    = 140    # is rendered >= 140 pt (~4.9 cm) on both sides,
+MIN_PIXELS     = 100    # and is >= 100 px on its shorter side (enough to hold data).
+FULLPAGE_COVER = 0.60   # >= 60% coverage counts as a (near) full-page image / scan.
+SCAN_TEXT_MAX  = 50     # a full-page image plus < 50 chars of text = likely a scan.
+
 def hexcolor(c): return f"#{c:06X}"
+
+def substantial_images(page):
+    """Return images likely to carry data (not small logos/decorations)."""
+    found = []
+    page_area = abs(page.rect.width * page.rect.height) or 1.0
+    for info in page.get_image_info():
+        r = fitz.Rect(info["bbox"])
+        if r.is_empty or r.is_infinite:
+            continue
+        cover = abs(r.get_area()) / page_area
+        pw, ph = info.get("width", 0), info.get("height", 0)
+        short_px = min(pw, ph)
+        if short_px < MIN_PIXELS:
+            continue
+        big_by_cover = cover >= PAGE_COVER_MIN
+        big_by_size = min(r.width, r.height) >= MIN_SIDE_PT
+        if big_by_cover or big_by_size:
+            found.append({"cover": round(cover, 2), "w_pt": round(r.width),
+                          "h_pt": round(r.height), "px": (pw, ph),
+                          "fullpage": cover >= FULLPAGE_COVER})
+    return found
 
 def yellow_rects(page):
     R = []
@@ -137,7 +168,9 @@ def analyse(path):
     doc = fitz.open(str(path))
     out = []
     for i, page in enumerate(doc):
-        info = {"page": i + 1, "color": [], "highlight": [], "strike": []}
+        info = {"page": i + 1, "color": [], "highlight": [], "strike": [],
+                "images": substantial_images(page),
+                "text_len": len(page.get_text("text").strip())}
         yellow, strokes = yellow_rects(page), strike_strokes(page)
         for b in page.get_text("dict")["blocks"]:
             for l in b.get("lines", []):
@@ -152,6 +185,8 @@ def analyse(path):
             for w in page.get_text("words"):
                 if is_struck((w[0], w[1], w[2], w[3]), strokes):
                     info["strike"].append(w[4])
+        info["scanned"] = (info["text_len"] < SCAN_TEXT_MAX
+                           and any(im["fullpage"] for im in info["images"]))
         out.append(info)
     return out
 
@@ -176,6 +211,27 @@ def report(path, pp):
         if p["highlight"]:
             print("  [FILL-IN FIELD (highlight) -> to be completed]:", " | ".join(p["highlight"]))
 
+    img_pages = [p for p in pp if p["images"]]
+    scan_pages = [p["page"] for p in pp if p["scanned"]]
+    ti = sum(len(p["images"]) for p in img_pages)
+    print(f"\n=== IMAGE MAP: {name} ===")
+    if not img_pages:
+        print("No substantial images (only small logos/decorations, if any).")
+        return
+    print(f"Substantial images: {ti} on {len(img_pages)} page(s). "
+          f"Likely scanned/image-only pages: {scan_pages or 'none'}.")
+    print("WARNING: data inside these images (text in scans, figures, tables as "
+          "pictures) is NOT reproduced by text extraction and is lost on conversion. "
+          "Recommend consulting the original PDF for these pages.")
+    for p in img_pages:
+        tags = []
+        for im in p["images"]:
+            kind = "full-page/scan" if im["fullpage"] else "image"
+            tags.append(f"{kind} {im['w_pt']}x{im['h_pt']}pt ({int(im['cover']*100)}% of page)")
+        note = " [image-only page: essentially all content is in the image]" if p["scanned"] else ""
+        print(f"\n<!-- source: {name} | page: {p['page']} -->{note}")
+        print("  [IMAGE(S) -> data at risk]:", "; ".join(tags))
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("target"); a = ap.parse_args()
     d = pathlib.Path(a.target)
@@ -196,6 +252,25 @@ doc[page_number - 1].get_pixmap(dpi=170).save("page.png")
 
 Reproduce the text in full according to all normal rules (anchors, tables, reading order), together with the revision rules above. If the image and the text layer conflict, the image prevails, because it shows color, highlight, and strikethrough as a reader sees them. Never let struck text disappear silently without this visual check.
 
+## Detecting images that may contain relevant data
+
+Text extraction reproduces the text layer of a PDF, but it cannot reproduce data that lives *inside* an image: text in a scanned page, numbers in a chart or diagram, a table captured as a screenshot, or a photographed document. That data is silently lost on conversion. The user must be warned before relying on the Markdown.
+
+The pre-scan's IMAGE MAP flags this. It reports, per page, the substantial raster images, distinguishing:
+
+- **Data-bearing images**: images that cover a meaningful part of the page (from `PAGE_COVER_MIN`, default ≥ 8% of the page area) or are rendered large (from `MIN_SIDE_PT`, default ≥ ~140 pt / ~4.9 cm on both sides), and are at least `MIN_PIXELS` px on the shorter side. These are photos, figures, diagrams, charts, and screenshots that plausibly contain information.
+- **Scanned / image-only pages**: a near full-page image (`FULLPAGE_COVER`, default ≥ 60% coverage) on a page whose extractable text is nearly empty (`SCAN_TEXT_MAX`, default < 50 characters). Here essentially all content is in the image and text extraction returns little or nothing.
+
+Small logos, icons, and decorations fall below these thresholds and are deliberately ignored, so they do not trigger a warning.
+
+When the IMAGE MAP reports one or more substantial images for a document, deliver a short, clearly separated warning to the user (in the chat, not inside the `.md` file). State plainly:
+
+- that the document contains one or more large images that may hold relevant data (list the affected pages, and mark any scanned / image-only pages);
+- that this in-image data is **not** reproduced by the text conversion and is therefore lost in the Markdown;
+- that for the affected pages it is advisable to consult or use the original PDF instead of relying on the Markdown.
+
+Keep the warning factual and brief; do not describe or invent the contents of the images. If no substantial images are found, do not add any warning. This warning is the only accompanying explanation permitted alongside the output.
+
 ## Handling non-textual elements
 
 - Tables: convert to correctly formatted Markdown tables. Preserve column headers, row order, and cell content exactly as in the original.
@@ -203,6 +278,8 @@ Reproduce the text in full according to all normal rules (anchors, tables, readi
   `[Image: short rendering of visible text or caption]`
   Do not invent visual descriptions. If no textual information is visible, use:
   `[Image without caption]`
+  If the pre-scan's IMAGE MAP flagged this image as substantial (data-bearing or a scanned/image-only page), place an anchor before the placeholder so the possible data loss stays traceable at that spot:
+  `<!-- image with possible data loss: consult the original PDF, page <n> -->`
 - Charts and diagrams: use only a placeholder; do not include any self-invented interpretation. Format:
   `[Chart: title or caption if present]`
   If there is no title or caption:
@@ -236,6 +313,6 @@ Preserve the original file name exactly as it is, including spaces, capitals, an
 
 ## Output
 
-Deliver only the separate `.md` files, one per source document (whether it came from the project context or as a chat attachment), with the content and HTML comment anchors described above.
+Deliver the separate `.md` files, one per source document (whether it came from the project context or as a chat attachment), with the content and HTML comment anchors described above.
 
-Do not give accompanying explanation, no summary of what you did, and no meta commentary outside the files.
+The only text permitted alongside the files is the image warning from "Detecting images that may contain relevant data", and only when the pre-scan flagged substantial images. Apart from that warning, do not give accompanying explanation, no summary of what you did, and no meta commentary outside the files.

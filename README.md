@@ -22,6 +22,7 @@ Purely geometric strikethrough detection is fragile: it is misled by watermarks 
   - Highlighted fill-in fields are kept, with a `<!-- fill-in field: ... -->` anchor.
   - Struck text is omitted from the final text (or optionally marked as `~~...~~`).
 - Tables converted to Markdown; images and charts represented by text placeholders.
+- Image-loss detection: warns when a PDF contains substantial images (scans, diagrams, screenshots) whose in-image data would be lost in the conversion, recommending the original PDF for those pages, while ignoring small logos and decorations.
 
 ## Requirements
 

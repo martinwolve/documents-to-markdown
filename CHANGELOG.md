@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-07-22
+
+### Fixed
+- Shortened the SKILL.md `description` to stay within the 1024-character limit
+  enforced when saving the skill (it had grown to 1096 characters after the
+  image-extraction change). No behavior change.
+
 ## [1.3.0] - 2026-07-22
 
 ### Changed

@@ -22,7 +22,8 @@ Purely geometric strikethrough detection is fragile: it is misled by watermarks 
   - Highlighted fill-in fields are kept, with a `<!-- fill-in field: ... -->` anchor.
   - Struck text is omitted from the final text (or optionally marked as `~~...~~`).
 - Tables converted to Markdown; small logos and decorations represented by text placeholders.
-- Image extraction: when a PDF contains substantial images (scans, diagrams, screenshots) whose in-image data would otherwise be lost, those images are extracted to separate files next to the `.md`, named after the source document, and referenced from the Markdown with a Markdown image link — so the text is converted while no image data is lost. Small logos and decorations are ignored.
+- Image extraction: when a PDF contains substantial images (diagrams, screenshots, figures) whose in-image data would otherwise be lost, those images are extracted to separate files next to the `.md`, named after the source document, and referenced from the Markdown with a Markdown image link — so the text is converted while no image data is lost. Small logos and decorations are ignored.
+- Image-only (scanned) pages, where the whole page including text and tables is a single image, are handled specially: the text and tables are OCR'd to Markdown and the full-page scan is **not** delivered as an image (it would only duplicate the OCR'd text). Only a genuine graphic on such a page (a photo, diagram, chart, or figure) is cropped out — without the surrounding text — and delivered as a separate image, and only when the page actually contains one.
 
 ## Requirements
 

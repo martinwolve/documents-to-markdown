@@ -1,7 +1,7 @@
 ---
 name: documents-to-markdown
-description: Converts documents available in the conversation — both in the project context and attached directly to the chat (PDF, Word, Excel, PowerPoint, txt, csv, rtf and other textual files) — into separate Markdown files, one per source document, preserving the full integral text and recognizable source and page marking via invisible HTML comments. Correctly handles revision markings (strikethrough, colored changes, highlighted fill-in fields) so that deleted text does not end up in the output, and extracts substantial images (scans, diagrams, screenshots) from a PDF as separate image files named after the source document, which the Markdown then references, so the text is converted while no image data is lost. Use this skill when the user explicitly asks to convert documents to Markdown or MD, for example "convert these documents to MD", "convert the PDFs to Markdown", "convert the attached documents to Markdown", or the Dutch equivalent "zet deze documenten om naar MD".
-version: 1.3.1
+description: Converts documents available in the conversation — both in the project context and attached directly to the chat (PDF, Word, Excel, PowerPoint, txt, csv, rtf and other textual files) — into separate Markdown files, one per source document, preserving the full integral text and recognizable source and page marking via invisible HTML comments. Correctly handles revision markings (strikethrough, colored changes, highlighted fill-in fields) so that deleted text does not end up in the output, and extracts substantial images (diagrams, screenshots, figures) from a PDF as separate image files named after the source document, which the Markdown then references, so the text is converted while no image data is lost. Scanned image-only pages are OCR'd. Use this skill when the user explicitly asks to convert documents to Markdown or MD, for example "convert these documents to MD", "convert the PDFs to Markdown", "convert the attached documents to Markdown", or the Dutch equivalent "zet deze documenten om naar MD".
+version: 1.4.0
 license: Apache-2.0
 ---
 
@@ -48,6 +48,7 @@ Handle all common document types that may appear in the project context or as a 
 5. Extract, per document, the full textual content:
    - If a page has no revision marking, plain text extraction suffices.
    - If a page does contain markings, transcribe that page via the image according to "Transcription via vision for revision markings".
+   - If a page is image-only (a scan: the whole page, including its running text and tables, is one image with no usable text layer — flagged as image-only / scanned in the IMAGE MAP), OCR its text via the image according to "Handling image-only (scanned) pages". Deliver its text as Markdown; do not deliver the full-page scan as an image, and deliver a cropped graphic region only where the page actually contains a graphic.
 6. Handle non-textual elements according to the rules under "Handling non-textual elements".
 7. Add an invisible HTML comment as an anchor before each text block, so it remains recognizable from which document and from which page, slide, or sheet the text originates.
 8. Deliver one separate `.md` file per source document according to the naming rules under "File naming", plus every image file extracted in step 4, delivered alongside the `.md` file and referenced from within it.
@@ -217,12 +218,19 @@ def save_one(doc, page, im, out_dir, base):
 
 def emit_images(doc, pp, out_dir, stem):
     """Extract every flagged substantial image to out_dir, named after the
-    source document as <stem>_p<page>_img<n>.<ext>. Records the saved file name
-    on each image so the report can print it for referencing from Markdown."""
+    source document as <stem>_p<page>_img<n>.<ext>. A full-page scan on an
+    image-only page is NOT emitted: its text is delivered as OCR'd Markdown and
+    any graphic on it is cropped separately (see SKILL.md, "Handling image-only
+    (scanned) pages"). Records the saved file name on each emitted image so the
+    report can print it for referencing from Markdown."""
     out = pathlib.Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     for p in pp:
-        for idx, im in enumerate(p["images"], 1):
+        idx = 0
+        for im in p["images"]:
+            if p["scanned"] and im["fullpage"]:
+                continue  # handled by OCR + optional graphic crop, not emitted
+            idx += 1
             im["saved"] = save_one(doc, doc[p["page"] - 1], im,
                                     out, f"{stem}_p{p['page']}_img{idx}")
     return pp
@@ -255,26 +263,39 @@ def report(path, pp):
     if not img_pages:
         print("No substantial images (only small logos/decorations, if any).")
         return
-    emitted = any(im["saved"] for p in img_pages for im in p["images"])
+    # Images the pre-scan will emit: everything except full-page scans on
+    # image-only pages (those are OCR'd to text and cropped by hand if needed).
+    to_emit = [im for p in img_pages for im in p["images"]
+               if not (p["scanned"] and im["fullpage"])]
+    emitted = any(im["saved"] for im in to_emit)
     print(f"Substantial images: {ti} on {len(img_pages)} page(s). "
-          f"Likely scanned/image-only pages: {scan_pages or 'none'}.")
-    if emitted:
-        print("These images are extracted to separate files (see 'saved as' below). "
-              "Reference each one from the Markdown with a Markdown image link at the "
-              "matching spot, so the in-image data (text in scans, figures, tables as "
-              "pictures) stays available alongside the converted text.")
-    else:
-        print("Re-run with --emit-images <dir> to extract these images to separate "
-              "files (data inside them is NOT reproduced by text extraction).")
+          f"Image-only/scanned pages: {scan_pages or 'none'}.")
+    print("Image-only pages: OCR the text & tables to Markdown and do NOT deliver "
+          "the full-page scan; crop & reference only a graphic region (photo, diagram, "
+          "chart, figure) if the page contains one. Other substantial images: extract "
+          "to a separate file and reference from the Markdown at the matching spot, so "
+          "the in-image data stays available alongside the converted text.")
+    if to_emit and not emitted:
+        print("Re-run with --emit-images <dir> to extract the referenced (non-scan) "
+              "images to separate files.")
     for p in img_pages:
+        if p["scanned"]:
+            print(f"\n<!-- source: {name} | page: {p['page']} --> [image-only page]")
+            print("  [OCR text & tables -> Markdown; do NOT emit the full-page scan. "
+                  "Crop & reference a graphic region only if the page has one.]")
+            extra = [im for im in p["images"] if not im["fullpage"]]
+            for im in extra:
+                saved = f" -> saved as {im['saved']}" if im["saved"] else ""
+                print(f"    embedded graphic {im['w_pt']}x{im['h_pt']}pt "
+                      f"({int(im['cover']*100)}% of page){saved}")
+            continue
         tags = []
         for im in p["images"]:
             kind = "full-page/scan" if im["fullpage"] else "image"
             saved = f" -> saved as {im['saved']}" if im["saved"] else ""
             tags.append(f"{kind} {im['w_pt']}x{im['h_pt']}pt "
                         f"({int(im['cover']*100)}% of page){saved}")
-        note = " [image-only page: essentially all content is in the image]" if p["scanned"] else ""
-        print(f"\n<!-- source: {name} | page: {p['page']} -->{note}")
+        print(f"\n<!-- source: {name} | page: {p['page']} -->")
         print("  [IMAGE(S) -> extract & reference]:", "; ".join(tags))
 
 if __name__ == "__main__":
@@ -306,6 +327,32 @@ doc[page_number - 1].get_pixmap(dpi=170).save("page.png")
 
 Reproduce the text in full according to all normal rules (anchors, tables, reading order), together with the revision rules above. If the image and the text layer conflict, the image prevails, because it shows color, highlight, and strikethrough as a reader sees them. Never let struck text disappear silently without this visual check.
 
+## Handling image-only (scanned) pages
+
+An image-only page is a scan: the whole page — running text, tables, and any graphics — is captured as a single raster image, and the PDF has no usable text layer for it. The pre-scan flags these pages as image-only / scanned in the IMAGE MAP. Handle such a page in two parts:
+
+1. **Text and tables → OCR to Markdown.** Render the page to an image and transcribe all of its text and tables from the image, following every normal rule (anchors, reading order, Markdown tables, and the revision rules where they apply). This is the same visual transcription used for revision markings:
+
+   ```python
+   import fitz
+   doc = fitz.open(pdf_path)
+   doc[page_number - 1].get_pixmap(dpi=200).save("page.png")
+   ```
+
+   Because the text is delivered in full as OCR'd Markdown, the full-page scan itself is **not** delivered as an image — that would only duplicate the text. The pre-scan therefore does not emit full-page scan images with `--emit-images`.
+
+2. **Graphic region → crop only when present.** Only if the page also contains a genuine graphic that OCR cannot reproduce — a photo, a diagram, a chart, a map, a figure, a signature, or a stamp — crop just that region and deliver it as a separate image, referenced at its spot in the reading order. Do not include the surrounding regular text in the crop; that text is already in the Markdown. Read the graphic's bounding box (in PDF points) from the rendered page and crop only that region:
+
+   ```python
+   import fitz
+   doc = fitz.open(pdf_path)
+   page = doc[page_number - 1]
+   clip = fitz.Rect(x0, y0, x1, y1)  # the graphic region only, in PDF points
+   page.get_pixmap(dpi=200, clip=clip).save(f"{stem}_p{page_number}_img1.png")
+   ```
+
+   Name and reference the cropped file exactly like any other extracted image (see "File naming" and "Handling non-textual elements"). If the page is purely text and tables with no such graphic, deliver no image for that page at all.
+
 ## Extracting images that may contain relevant data
 
 Text extraction reproduces the text layer of a PDF, but it cannot reproduce data that lives *inside* an image: text in a scanned page, numbers in a chart or diagram, a table captured as a screenshot, or a photographed document. If that data were dropped, it would be silently lost on conversion. Instead of warning about this loss, extract those images to separate files and reference them from the Markdown, so the text is converted while the image data stays available alongside it.
@@ -313,13 +360,13 @@ Text extraction reproduces the text layer of a PDF, but it cannot reproduce data
 The pre-scan's IMAGE MAP flags which images to extract. It reports, per page, the substantial raster images, distinguishing:
 
 - **Data-bearing images**: images that cover a meaningful part of the page (from `PAGE_COVER_MIN`, default ≥ 8% of the page area) or are rendered large (from `MIN_SIDE_PT`, default ≥ ~140 pt / ~4.9 cm on both sides), and are at least `MIN_PIXELS` px on the shorter side. These are photos, figures, diagrams, charts, and screenshots that plausibly contain information.
-- **Scanned / image-only pages**: a near full-page image (`FULLPAGE_COVER`, default ≥ 60% coverage) on a page whose extractable text is nearly empty (`SCAN_TEXT_MAX`, default < 50 characters). Here essentially all content is in the image and text extraction returns little or nothing.
+- **Scanned / image-only pages**: a near full-page image (`FULLPAGE_COVER`, default ≥ 60% coverage) on a page whose extractable text is nearly empty (`SCAN_TEXT_MAX`, default < 50 characters). Here essentially all content is in the image and text extraction returns little or nothing. These pages are **not** delivered as a full-page image: their text and tables are OCR'd to Markdown, and only a graphic embedded in the page (if any) is cropped out and delivered. See "Handling image-only (scanned) pages".
 
 Small logos, icons, and decorations fall below these thresholds and are deliberately ignored, so they are not extracted.
 
 When the IMAGE MAP reports one or more substantial images for a document:
 
-1. Run the pre-scan with `--emit-images <dir>`, pointing `<dir>` at the same location where the `.md` files are delivered, so each flagged image is written to a separate file next to the Markdown. The images are named after the source document, `<source_stem>_p<page>_img<n>.<ext>` (see "File naming"), and the IMAGE MAP reports the saved file name per image.
+1. Run the pre-scan with `--emit-images <dir>`, pointing `<dir>` at the same location where the `.md` files are delivered, so each flagged image is written to a separate file next to the Markdown. The images are named after the source document, `<source_stem>_p<page>_img<n>.<ext>` (see "File naming"), and the IMAGE MAP reports the saved file name per image. Full-page scans on image-only pages are deliberately not emitted here; they are handled per "Handling image-only (scanned) pages" (OCR the text, crop only a graphic if present).
 2. In the `.md` file, at the spot where each extracted image appears in the reading order, insert a Markdown image link to the saved file, preceded by a traceability anchor (see "Handling non-textual elements"). This keeps the information intact: the converted text and a reference to the original image sit together at the right place.
 
 The extracted image files are delivered alongside the `.md` file. Do not describe or invent the contents of the images; the reference to the extracted file is what preserves the data. If no substantial images are found, no image files are produced and no reference is added.
@@ -328,7 +375,8 @@ The extracted image files are delivered alongside the `.md` file. Do not describ
 
 - Tables: convert to correctly formatted Markdown tables. Preserve column headers, row order, and cell content exactly as in the original.
 - Images:
-  - If the pre-scan's IMAGE MAP flagged this image as substantial (data-bearing or a scanned/image-only page), it is extracted to a separate file (see "Extracting images that may contain relevant data"). At the spot where the image appears in the reading order, place a traceability anchor followed by a Markdown image link to the extracted file:
+  - If the page is an image-only (scanned) page, do not deliver the full-page scan as an image. OCR its text to Markdown and crop only a graphic region if the page contains one, per "Handling image-only (scanned) pages". A cropped graphic is then referenced like any other extracted image, using the format below.
+  - If the pre-scan's IMAGE MAP flagged this image as substantial (a data-bearing figure on a text page, or a graphic cropped from an image-only page), it is extracted to a separate file (see "Extracting images that may contain relevant data"). At the spot where the image appears in the reading order, place a traceability anchor followed by a Markdown image link to the extracted file:
     `<!-- image extracted to separate file: <filename>, source page <n> -->`
     `![<caption or legible text, else: Image from <source> page <n>>](<filename>)`
     Use the image's visible caption, title, or legible text as the alt text when present; otherwise fall back to `Image from <source> page <n>`. Do not invent a visual description of the image contents.

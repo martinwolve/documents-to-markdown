@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-07-22
+
+### Changed
+- Substantial images detected in a PDF are now **extracted to separate image
+  files** instead of only triggering a warning about lost data. Each flagged
+  image is written next to the `.md` file, named after the source document
+  (`<source>_p<page>_img<n>.<ext>`), and the Markdown references it with a
+  Markdown image link at the matching spot, so the text is converted while the
+  in-image data stays available.
+- The detection pre-scan gained an `--emit-images <dir>` option that extracts
+  every flagged image (preferring the original embedded bytes at native
+  resolution, falling back to rendering the image region). The IMAGE MAP now
+  reports the saved file name per image for referencing.
+- The image placeholder anchor for flagged images changed from a data-loss
+  warning to an extraction reference
+  (`<!-- image extracted to separate file: <filename>, source page <n> -->`
+  followed by `![...](<filename>)`).
+
 ## [1.2.0] - 2026-07-22
 
 ### Added
